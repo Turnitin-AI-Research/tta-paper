@@ -1,0 +1,22 @@
+-f https://download.pytorch.org/whl/cu118
+# pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+torch==2.0.*
+transformers
+accelerate
+datasets>=2.0.0
+ray[default]
+pandas
+modin[all]
+plotly
+fire
+
+# IDE
+pycodestyle
+mypy
+pydocstyle
+pylint
+autopep8
+ipykernel
+ipython
+nbformat
