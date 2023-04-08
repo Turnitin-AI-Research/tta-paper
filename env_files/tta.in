@@ -2,7 +2,7 @@
 # pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 torch==2.0.*
-transformers
+transformers==4.27.*
 accelerate
 datasets>=2.0.0
 ray[default]
