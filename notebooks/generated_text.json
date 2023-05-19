@@ -1,0 +1,1 @@
+generated_text_bigscience_bloomz-7b1,max_new_tokens=500,gen_args=sampling,dataset=alpaca_train,size=1000.json
