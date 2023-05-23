@@ -5,6 +5,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForSeq2Se
 import torch
 from torch import Tensor
 import numpy as np
+from scipy import signal
 import plotly.express as px
 import plotly.graph_objects as go
 import ray
@@ -20,6 +21,8 @@ def load_tokenizer(model_name):
 def load_model(model_name, device='cpu', parallelize: bool = False):
     if parallelize:
         assert device in [0, '0', 'cuda:0'], f'Device ({device}) must be set to "0" with parallelize model-arg'
+    if isinstance(device, str) and device.isdigit():
+        device = int(device)
     try:
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
@@ -52,7 +55,7 @@ def concat(lT: List[torch.Tensor], pad_value=torch.nan) -> torch.Tensor:
 
 def tokenize(text, tokenizer):
     return tokenizer(text, return_tensors='pt', return_attention_mask=True,
-                     padding=True, add_special_tokens=False)
+                     padding=True, add_special_tokens=False, return_offsets_mapping=True)
 
 
 def forward(text, tokenizer, model):
@@ -191,11 +194,13 @@ def ray_generate(*, model_name, NUM_GPUS_PER_INSTANCE, **kwargs):
 def ray_get_probs(*, model_name, NUM_GPUS_PER_INSTANCE, **kwargs):
     import os
     os.environ['PYTORCH_NO_CUDA_MEMORY_CACHING'] = '1'
+    os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
     model, tokenizer = load_model(model_name, device='0', parallelize=(NUM_GPUS_PER_INSTANCE > 1))
     return get_probs(**kwargs, tokenizer=tokenizer, model=model)
 
 
-def avg_token_score(score: Tensor, mask: Tensor, min_occur: int):
+def avg_token_score(score: Tensor, mask: Tensor, min_occur: int, device='cpu'):
+    score_device = score.device
     mt = torch.masked.masked_tensor(score, mask.to(dtype=torch.bool))
     meanp = mt.mean(0)
     stdp = mt.std(0)
@@ -208,37 +213,39 @@ def avg_token_score(score: Tensor, mask: Tensor, min_occur: int):
     if trunc_pos > 0:
         return meanp[:-trunc_pos], stdp[:-trunc_pos], pos_count[:-trunc_pos]
     else:
-        return meanp, stdp, pos_count
+        return meanp.to(device=score_device), stdp.to(device=score_device), pos_count.to(device=score_device)
 
 
 # Compute entropy of probability distributions over tokens for each position from all_prob
 # all_prob is a tensor of shape (num_samples, num_tokens, vocab_size) and
 # att_mask is a tensor of shape (num_samples, num_tokens)
-def compute_entropy(all_prob, att_mask):
-    att_mask = att_mask.cpu().unsqueeze(-1).expand(all_prob.shape)
-    all_prob = torch.masked.masked_tensor(all_prob.cpu(), att_mask.to(dtype=torch.bool))
+def compute_entropy(all_prob, att_mask, device='cpu'):
+    all_prob_device = all_prob.device
+    att_mask = att_mask.to(device=device).unsqueeze(-1).expand(all_prob.shape)
+    all_prob = torch.masked.masked_tensor(all_prob.to(device=device), att_mask.to(dtype=torch.bool))
     entropy = -(all_prob * torch.log(all_prob)).sum(-1)
-    return entropy.to_tensor(torch.nan)
+    return entropy.to_tensor(torch.nan).to(device=all_prob_device)
 
 
-def compute_entropy_from_list(all_prob_list, att_mask_list):
-    return concat([compute_entropy(all_prob, att_mask) for all_prob, att_mask in zip(all_prob_list, att_mask_list)])
+def compute_entropy_from_list(all_prob_list, att_mask_list, device='cpu'):
+    return concat([compute_entropy(all_prob, att_mask, device) for all_prob, att_mask in zip(all_prob_list, att_mask_list)])
 
 
-def compute_num_top_tokens(all_prob, mask, p):
-    mask = mask.unsqueeze(-1)
-    all_prob = all_prob * mask
+def compute_num_top_tokens(all_prob, mask, p, device='cpu'):
+    all_prob_device = all_prob.device
+    mask = mask.unsqueeze(-1).to(device=device)
+    all_prob = all_prob.to(device=device) * mask
     sorted_probs, sorted_indices = torch.sort(all_prob, descending=True, dim=-1)
     cum_probs = sorted_probs.cumsum(-1)  # (... , vocab_size)
     mask = (cum_probs <= p)
     # make sure we have at least one token
     mask[..., 0] = 1
     num_top_p_tokens = mask.sum(-1)  # (...)
-    return num_top_p_tokens
+    return num_top_p_tokens.to(device=all_prob_device)
 
 
-def compute_num_top_tokens_from_list(all_prob_list, att_mask_list, p):
-    return concat([compute_num_top_tokens(all_prob, att_mask, p).to(dtype=float) for all_prob, att_mask in zip(all_prob_list, att_mask_list)])
+def compute_num_top_tokens_from_list(all_prob_list, att_mask_list, p, device='cpu'):
+    return concat([compute_num_top_tokens(all_prob, att_mask, p, device).to(dtype=float) for all_prob, att_mask in zip(all_prob_list, att_mask_list)])
 
 
 def plot_band(meanp, stdp, title=None, legend=None):
@@ -248,7 +255,19 @@ def plot_band(meanp, stdp, title=None, legend=None):
             name=legend or 'mean',
             y=meanp,
             mode='lines',
-            line=dict(color='rgb(31, 119, 180)'),
+            line=dict(color='rgb(31, 119, 180)')
+        ),
+        go.Scatter(
+            name=f'Smoothed {legend}',
+            mode='lines',
+            y=signal.savgol_filter(meanp,
+                                   100,  # window size used for filtering
+                                   3),  # order of fitted polynomial,
+            # marker=dict(
+            #     size=1,
+            #     # color='mediumpurple',
+            #     symbol='circle-dot'
+            # )
         ),
         go.Scatter(
             name='+std dev',
@@ -270,9 +289,9 @@ def plot_band(meanp, stdp, title=None, legend=None):
         )
     ])
     fig.update_layout(
-        yaxis_title='Probability',
-        title=title or 'Mean Position Probability With Std Dev',
-        xaxis_title='Sequence Position',
+        yaxis_title=legend,
+        title=title,
+        xaxis_title='Token Position',
         hovermode="x"
     )
     return fig
