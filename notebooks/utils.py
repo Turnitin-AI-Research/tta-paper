@@ -1,7 +1,11 @@
 from typing import List, Optional
 import os
+import pickle
+import math
 import transformers
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForSeq2SeqLM
+from datasets import load_dataset_builder
+from datasets import load_dataset
 import torch
 from torch import Tensor
 import numpy as np
@@ -9,6 +13,23 @@ from scipy import signal
 import plotly.express as px
 import plotly.graph_objects as go
 import ray
+import pandas as pd
+
+
+def is_enc_dec(model) -> bool:
+    """Return True if this is an encoder-decoder model like T5."""
+    if isinstance(model, (transformers.T5ForConditionalGeneration,
+                          transformers.MT5ForConditionalGeneration)):
+        return True
+    elif isinstance(model, (transformers.GPT2LMHeadModel,
+                            transformers.GPTNeoForCausalLM,
+                            transformers.GPTJForCausalLM,
+                            transformers.GPTNeoXForCausalLM,
+                            transformers.BloomForCausalLM
+                            )):
+        return False
+    else:
+        raise NotImplementedError()
 
 
 def load_tokenizer(model_name):
@@ -30,10 +51,11 @@ def load_model(model_name, device='cpu', parallelize: bool = False):
         )
     except ValueError:
         model = transformers.AutoModelForSeq2SeqLM.from_pretrained(
-            model_name
+            model_name,
+            device_map='auto' if parallelize else None
         )
-        if parallelize:
-            model = model.parallelize()
+        # if parallelize:  # T5 requires an explicit call to parallelize()
+        #     model.parallelize()
     if not parallelize:
         model = model.to(device=device)
     tokenizer = load_tokenizer(model_name)
@@ -53,22 +75,41 @@ def concat(lT: List[torch.Tensor], pad_value=torch.nan) -> torch.Tensor:
         return torch.cat([torch.nn.functional.pad(t, pad=(0, 0, 0, max_y - t.shape[1]), value=pad_value) for t in lT])
 
 
-def tokenize(text, tokenizer):
+def tokenize(text, tokenizer, add_special_tokens=False, return_offsets_mapping=False):
     return tokenizer(text, return_tensors='pt', return_attention_mask=True,
-                     padding=True, add_special_tokens=False, return_offsets_mapping=True)
+                     padding=True, add_special_tokens=add_special_tokens, return_offsets_mapping=return_offsets_mapping)
 
 
 def forward(text, tokenizer, model):
     model.eval()
     device = model.device
+    enc_dec = is_enc_dec(model)
+    batch_size = 1 if isinstance(text, str) else len(text)
     with torch.no_grad():
-        model_input = tokenize(text, tokenizer)
+        if not enc_dec:
+            model_input = tokenize(text, tokenizer)
+        else:
+            model_input = tokenize('' if isinstance(text, str) else [''] * batch_size, tokenizer, add_special_tokens=True)
+            decoder_input = tokenize(text, tokenizer)
+            # model_input['decoder_input_ids'] = model._shift_right(decoder_input['input_ids'])
+            # model_input['decoder_attention_mask'] = model._shift_right(decoder_input['attention_mask'])
+            # model_input['decoder_attention_mask'][:, 0] = 1
+            model_input['decoder_input_ids'] = decoder_input['input_ids']
+            model_input['decoder_attention_mask'] = decoder_input['attention_mask']
         for key in model_input.keys():
             model_input[key] = model_input[key].to(device=device)
-        model_output = model(input_ids=model_input['input_ids'],
-                             attention_mask=model_input['attention_mask'],
-                             output_hidden_states=True,
-                             return_dict=True)
+        if not enc_dec:
+            model_output = model(input_ids=model_input['input_ids'],
+                                 attention_mask=model_input['attention_mask'],
+                                 output_hidden_states=True,
+                                 return_dict=True)
+        else:
+            model_output = model(input_ids=model_input['input_ids'],
+                                 attention_mask=model_input['attention_mask'],
+                                 decoder_input_ids=model_input['decoder_input_ids'],
+                                 decoder_attention_mask=model_input['decoder_attention_mask'],
+                                 output_hidden_states=True,
+                                 return_dict=True)
     return model_input, model_output
 
 
@@ -133,21 +174,31 @@ def get_sim(text, tokenizer, model):
 
 def get_all_probs(text, tokenizer, model, align_with_inp: bool = False):
     model.eval()
+    if is_enc_dec(model):
+        assert not align_with_inp, 'align_with_inp not supported for encoder-decoder models'
     with torch.no_grad():
         model_input, model_output = forward(text, tokenizer, model)
         all_probs = torch.softmax(model_output.logits, -1)
-    all_probs = all_probs[:, :-1, :] if align_with_inp else all_probs
+    if align_with_inp:
+        all_probs = all_probs[:, :-1, :]
     return all_probs.detach(), model_input, model_output
 
 
 def get_probs(texts, tokenizer, model, batch_size):
     model.eval()
+    enc_dec = is_enc_dec(model)
     probs_list, attention_mask_list, all_probs_list = [], [], []
     with torch.no_grad():
         for batch_start in range(0, len(texts), batch_size):
             all_probs, model_input, _ = get_all_probs(texts[batch_start: batch_start + batch_size], tokenizer, model)
-            probs = all_probs[:, :-1, :].gather(-1, model_input['input_ids'][:, 1:].unsqueeze(-1)).squeeze(-1)
-            attention_mask = model_input.attention_mask[:, :-1]
+            if enc_dec:
+                input_ids = model_input['decoder_input_ids']
+                attention_mask = model_input['decoder_attention_mask']
+            else:
+                input_ids = model_input['input_ids']
+                attention_mask = model_input['attention_mask']
+            probs = all_probs[:, :-1, :].gather(-1, input_ids[:, 1:].unsqueeze(-1)).squeeze(-1)
+            attention_mask = attention_mask[:, :-1]
             probs = (probs * attention_mask).detach().cpu()
             all_probs = (all_probs[:, :-1, :] * attention_mask.unsqueeze(-1)).detach().cpu()
             probs_list.append(probs)
@@ -199,21 +250,98 @@ def ray_get_probs(*, model_name, NUM_GPUS_PER_INSTANCE, **kwargs):
     return get_probs(**kwargs, tokenizer=tokenizer, model=model)
 
 
-def avg_token_score(score: Tensor, mask: Tensor, min_occur: int, device='cpu'):
+def masked_percentile(x, mask, p):
+    # Compute percentile across batch dimension
+    assert x.dim() == 2
+    assert x.shape == mask.shape
+    mask = mask.to(dtype=torch.bool)
+    return torch.stack([torch.quantile(x[mask[:, j], j], p) for j in range(x.shape[1])])
+
+
+def run_get_probs(probs_save_filename, model_name, texts, batch_size2, device, NUM_GPUS_PER_INSTANCE, model, tokenizer, use_ray: bool = True):
+    if os.path.exists(probs_save_filename):
+        with open(probs_save_filename, 'rb') as fp:
+            prob_list, att_mask_list, all_prob_list = pickle.load(fp).values()
+    else:
+        responses = []
+        num_raylets = math.ceil(cuda_device_count() / NUM_GPUS_PER_INSTANCE)
+        num_samples_per_raylet = math.ceil(len(texts) / num_raylets)
+        if (num_raylets > 1) or use_ray:
+            ray.init(ignore_reinit_error=True, address='local')
+            futures = [
+                ray_get_probs.options(num_gpus=NUM_GPUS_PER_INSTANCE).remote(model_name=model_name, NUM_GPUS_PER_INSTANCE=NUM_GPUS_PER_INSTANCE,
+                                                                             texts=texts[i: i + num_samples_per_raylet], batch_size=batch_size2)
+                for i in range(0, len(texts), num_samples_per_raylet)]
+            responses = ray.get(futures)
+            _p, _a, _ap = zip(*responses)
+            prob_list, att_mask_list, all_prob_list = flatten(_p), flatten(_a), flatten(_ap)
+            ray.shutdown()
+        else:
+            del_model = False
+            if model is None:
+                model, tokenizer = load_model(model_name, device, (NUM_GPUS_PER_INSTANCE > 1))
+                del_model = True
+            prob_list, att_mask_list, all_prob_list = get_probs(
+                texts=texts, tokenizer=tokenizer, model=model, batch_size=batch_size2)
+            if del_model:
+                del model
+        with open(probs_save_filename, 'wb') as fp:
+            pickle.dump(dict(prob_list=prob_list, att_mask_list=att_mask_list, all_prob_list=all_prob_list), fp)
+    prob, att_mask = concat(prob_list), concat(att_mask_list, 0)
+    return all_prob_list, att_mask_list, prob, att_mask
+
+
+def get_seqs(path, name, split, size, seq_len, model_name):
+    tokenizer = load_tokenizer(model_name)
+    if name != 'random':
+        dataset = load_dataset(path, name, split=split, streaming=True)
+        dataset_iter = iter(dataset)
+        texts, seqs = [], []
+        for i, row in enumerate(dataset_iter):
+            tokenized = tokenize(row['text'], tokenizer, return_offsets_mapping=True)
+            seq = tokenized.input_ids
+            if seq.shape[1] >= seq_len:
+                seqs.append(seq[:seq_len])
+                texts.append(row['text'][:tokenized.offset_mapping[0, seq_len-1, 1]])
+            if len(texts) >= size:
+                break
+    else:
+        # Generate random id sequences
+        ids = list(tokenizer.get_vocab().values())
+        seqs = np.random.choice(ids, size=(size, seq_len), replace=True)
+        texts = [tokenizer.decode(seq) for seq in seqs]
+
+    display(pd.Series([len(text) for text in texts]).describe())
+    return seqs, texts
+
+
+def avg_token_score(score: Tensor, mask: Tensor, min_occur: int, device='cpu', percentile: Optional[float] = 0.05):
     score_device = score.device
     mt = torch.masked.masked_tensor(score, mask.to(dtype=torch.bool))
     meanp = mt.mean(0)
     stdp = mt.std(0)
+    if percentile is not None:
+        minp = masked_percentile(score, mask, percentile)
+        maxp = masked_percentile(score, mask, 1. - percentile)
+    else:
+        minp = mt.amin(0)
+        maxp = mt.amax(0)
     pos_count = mask.sum(0)  # monotonically decreasing with position
     trunc_pos = (pos_count < min_occur).sum()  # number of positions from the end with too few occurrences
     assert (~meanp.get_mask()).sum() == 0
     assert (~stdp.get_mask()).sum() == 0
     meanp = meanp.to_tensor(torch.nan)
     stdp = stdp.to_tensor(torch.nan)
+    if percentile is None:
+        minp = minp.to_tensor(torch.nan)
+        maxp = maxp.to_tensor(torch.nan)
+
     if trunc_pos > 0:
-        return meanp[:-trunc_pos], stdp[:-trunc_pos], pos_count[:-trunc_pos]
-    else:
-        return meanp.to(device=score_device), stdp.to(device=score_device), pos_count.to(device=score_device)
+        # remove positions with too few occurrences
+        meanp, stdp, pos_count, minp, maxp = meanp[:-trunc_pos], stdp[:-
+                                                                      trunc_pos], pos_count[:-trunc_pos], minp[:-trunc_pos], maxp[:-trunc_pos]
+
+    return meanp.to(device=score_device), stdp.to(device=score_device), pos_count.to(device=score_device), minp.to(device=score_device), maxp.to(device=score_device)
 
 
 # Compute entropy of probability distributions over tokens for each position from all_prob
@@ -223,7 +351,7 @@ def compute_entropy(all_prob, att_mask, device='cpu'):
     all_prob_device = all_prob.device
     att_mask = att_mask.to(device=device).unsqueeze(-1).expand(all_prob.shape)
     all_prob = torch.masked.masked_tensor(all_prob.to(device=device), att_mask.to(dtype=torch.bool))
-    entropy = -(all_prob * torch.log(all_prob)).sum(-1)
+    entropy = -(all_prob * torch.log(all_prob + 1e-13)).sum(-1)
     return entropy.to_tensor(torch.nan).to(device=all_prob_device)
 
 
@@ -248,7 +376,7 @@ def compute_num_top_tokens_from_list(all_prob_list, att_mask_list, p, device='cp
     return concat([compute_num_top_tokens(all_prob, att_mask, p, device).to(dtype=float) for all_prob, att_mask in zip(all_prob_list, att_mask_list)])
 
 
-def plot_band(meanp, stdp, title=None, legend=None):
+def plot_band(meanp, minp, maxp, title=None, legend=None, show_smoothed: bool = False):
 
     fig = go.Figure([
         go.Scatter(
@@ -258,36 +386,40 @@ def plot_band(meanp, stdp, title=None, legend=None):
             line=dict(color='rgb(31, 119, 180)')
         ),
         go.Scatter(
-            name=f'Smoothed {legend}',
-            mode='lines',
-            y=signal.savgol_filter(meanp,
-                                   100,  # window size used for filtering
-                                   3),  # order of fitted polynomial,
-            # marker=dict(
-            #     size=1,
-            #     # color='mediumpurple',
-            #     symbol='circle-dot'
-            # )
-        ),
-        go.Scatter(
-            name='+std dev',
-            y=meanp + stdp,
+            name='max',
+            y=maxp,
             mode='lines',
             marker=dict(color="#444"),
             line=dict(width=0),
             showlegend=False
         ),
         go.Scatter(
-            name='-std dev',
-            y=meanp - stdp,
+            name='min',
+            y=minp,
             marker=dict(color="#444"),
             line=dict(width=0),
             mode='lines',
-            fillcolor='rgba(68, 68, 68, 0.3)',
+            fillcolor='rgba(180, 180, 180, 0.3)',
             fill='tonexty',
             showlegend=False
         )
     ])
+    if show_smoothed:
+        fig.add_trace(
+            go.Scatter(
+                name=f'Smoothed {legend}',
+                mode='lines',
+                y=signal.savgol_filter(meanp,
+                                       100,  # window size used for filtering
+                                       3),  # order of fitted polynomial,
+                # marker=dict(
+                #     size=1,
+                #     # color='mediumpurple',
+                #     symbol='circle-dot'
+                # )
+            )
+        )
+
     fig.update_layout(
         yaxis_title=legend,
         title=title,
@@ -295,6 +427,10 @@ def plot_band(meanp, stdp, title=None, legend=None):
         hovermode="x"
     )
     return fig
+
+
+def plot_band_(meanp, stdp, title=None, legend=None):
+    plot_band(meanp, meanp - stdp, meanp + stdp, title=title, legend=legend)
 
 
 def lens_to_mask(seq_lens):

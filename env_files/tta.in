@@ -2,14 +2,19 @@
 # pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 torch==2.0.*
-transformers==4.27.*
+transformers>=4.27
 accelerate
 datasets>=2.0.0
+# Protobuf should be <= 3.20.x otherwise google/mt5-* model's don't work.
+protobuf <= 3.20.*
 ray[default]
 pandas
 modin[all]
 plotly
 fire
+scipy
+sentencepiece
+
 
 # IDE
 pycodestyle
