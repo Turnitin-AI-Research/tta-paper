@@ -6,7 +6,7 @@ import numpy as np
 from ruamel.yaml import YAML
 import plotly.express as px
 from dash import dcc
-from commons.params import Params, NDict
+from params import Params, NDict
 
 # UCS colormap is perceptually Uniform Color Space i.e. it has linear visual perception delta of which
 # viridis is the gold standard (see https://arxiv.org/pdf/1712.01662.pdf)
@@ -37,7 +37,7 @@ class TensorSpec(NDict):
                  latexName: Optional[str] = None,
                  htmlName: Optional[str] = None,
                  colorscale: str = 'icefire_r',
-                 draw_graph2: bool = False,
+                 draw_graph2: bool = True,
                  xaxis_title: Optional[str] = None,
                  yaxis_title: Optional[str] = None,
                  vscale: Union[int, float] = 1,
@@ -140,7 +140,8 @@ class TensorSpec(NDict):
                             (['show-tokens'] if show_tokens else []) +
                             (['show-y-tokens'] if show_y_tokens else []) +
                             (['knn'] if knn else []) +
-                            (['stack-heads'] if stack_heads else [])
+                            (['stack-heads'] if stack_heads else []) +
+                            (['draw-graph2'] if draw_graph2 else [])
                         ),
                         persist=True
                     ),

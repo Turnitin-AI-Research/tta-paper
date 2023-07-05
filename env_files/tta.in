@@ -9,11 +9,19 @@ datasets>=2.0.0
 protobuf <= 3.20.*
 ray[default]
 pandas
-modin[all]
+# modin[all]
 plotly
 fire
 scipy
 sentencepiece
+# for tiiuae/falcon
+bitsandbytes
+einops
+ruamel.yaml
+faiss-gpu
+dash
+dash-bootstrap-components
+kaleido
 
 
 # IDE

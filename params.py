@@ -1,10 +1,8 @@
 """Utility methods for pandagrader modules."""
-import pprint
 from pathlib import Path
 from typing import Any, Mapping, Optional, Union, Dict, List, Tuple
 import json
 import gzip
-import numpy as np
 from ruamel.yaml import YAML
 
 # Common type hints
@@ -109,7 +107,6 @@ class Params(dict):
             d: Optional dictionary-like object to initialize the params. The initializer will descend all nested
                 dictionary-like values and convert them all to objects of this class using self._new. Can be
                 a dict, Params, HyperParams or any type that looks like a python Mapping.
-            kwargs: kwargs that will be converted to key,value pairs. Can only be supplied if d is None.
         """
         if d is not None:
             assert isinstance(d, (Mapping, Dict)), f'Argument type is {type(d)}, should be a dictionary or subclass'
@@ -151,7 +148,7 @@ class Params(dict):
         """
         return Params(val)
 
-    def _dict2params(self, d: Mapping) -> Any:  # can't annotate return type with self class
+    def _dict2params(self, d: Mapping) -> Any:  # can't annotate return type with Params
         """Convert all nested dict values to self._new() objects.
 
         Useful when deserializing a Json file.
@@ -162,25 +159,10 @@ class Params(dict):
         """
         new_d = self._new()
         for k, v in d.items():
-            # if v is None:  # None values are never set
-            #     pass
-            if isinstance(v, Mapping):  # and not isinstance(v, self._params_class())
+            if v is None:  # None values are never set
+                pass
+            elif isinstance(v, Mapping):  # and not isinstance(v, self._params_class())
                 new_d[k] = self._new(v)
-            else:
-                new_d[k] = v
-        return new_d
-
-    def to_dict(self) -> Dict:
-        """
-        Convert to a Dict, including nested Params.
-        Also results in a deep copy of dictionary and list values.
-        Returns:
-            A dict object
-        """
-        new_d = dict()
-        for k, v in self.items():
-            if isinstance(v, Params):
-                new_d[k] = v.to_dict()
             else:
                 new_d[k] = v
         return new_d
@@ -197,10 +179,6 @@ class Params(dict):
     def to_data_dict(self) -> dict:
         """Convert to a data-only dictionary. Raises error in case of non-data contents."""
         return json.loads(json.dumps(self))
-
-    def print(self) -> None:
-        """Pretty print self"""
-        pprint.pprint(self)
 
     def _get_val_(self, key: Any, raise_if_not_exists: bool = False) -> Any:
         """Innermost function for getting value."""
@@ -351,15 +329,6 @@ class Params(dict):
         else:
             return self._set_val_(key, val)
 
-    def __eq__(self, __o: object) -> bool:
-        keys = set(self.keys())
-        if set(__o.keys()) != keys:
-            return False
-        for key in keys:
-            if self[key] != __o[key]:
-                return False
-        return True
-
     def is_frozen(self) -> bool:
         """
         Return True if the object is frozen. False otherwise.
@@ -401,6 +370,22 @@ class Params(dict):
             if isinstance(v, Params) and self._intercept(k):
                 v.seal()
         return self
+
+
+# class HyperParams(Params):
+#     """
+#     Specialization of Params class for Hyper Parameters.
+#     """
+
+#     @classmethod
+#     def _params_class(cls) -> Any:
+#         """Overridden to return this class"""
+#         return HyperParams
+
+#     @classmethod
+#     def _new(cls, val: Optional[Mapping] = None) -> Any:
+#         """Overriden to return objects of this class"""
+#         return HyperParams(val)
 
 
 class NDict(dict):
@@ -474,89 +459,3 @@ def to_ndict(o: Any) -> Any:
         return NDict({k: to_ndict(v) for k, v in o.items()})
     else:
         return o
-
-
-class Params2(Params):
-    """
-    Extends Params to recognize / allow lists type containers (in addition to dictionary type) at the pre-leaf level.
-    This enables indexing into (for reading only) what would've been a leaf level list in the Params data-structure.
-    e.g. params['classes.1.examples.[0]'] will return the first element of the list at 'classes.1.examples'.
-    """
-    @classmethod
-    def _new(cls, val: Optional[Mapping] = None) -> 'Params2':
-        """Create and return a new object of this class.
-
-        When you inherit, override this method to return a new object of your class.
-        """
-        return Params2(val)
-
-    def _get_val_(self, key: Any, raise_if_not_exists: bool = False) -> Any:
-        """Innermost function for getting value."""
-        keys = key.split('.')
-        if len(keys) > 1:
-            listCont = False
-            if keys[1].startswith('['):
-                listCont = True
-                assert len(keys) == 2, KeyError('index key (e.g. [0]) can only appear last')
-                id = int(keys[1][1:-1])
-            sub_params = dict.get(self, keys[0])
-            if (not listCont and not isinstance(sub_params, Mapping)) or (
-                    # listCont and not isinstance(sub_params, [List, np.ndarray])
-                    listCont and (np.ndim(sub_params) != 1)
-                    ):
-                if raise_if_not_exists:  # pylint: disable=no-else-raise
-                    raise KeyError(
-                        f'key {keys[0]} {"does not exist" if sub_params is None else "is the wrong type of container"}')
-                else:
-                    return None
-            elif not listCont:
-                return sub_params['.'.join(keys[1:])]
-            else:  # listCont
-                if len(sub_params) > id:
-                    return sub_params[id]
-                elif raise_if_not_exists:
-                    raise KeyError(f'key {keys[0]}.{key[1]} does not exist')
-                else:
-                    return None
-        else:
-            # return dict.__getitem__(self, key)
-            val = dict.get(self, key)
-            if raise_if_not_exists and val is None:
-                raise KeyError(f'key {key} does not exist')
-            return val
-
-    def _set_val_(self, key: Any, val: Any) -> None:
-        """
-        Set key to val except if object is frozen or key is a new key and the object was sealed.
-        Note: Setting a key to None effectively unsets it (though the key exists in the dictionary).
-        """
-        # if val is None:
-        #     return
-        if self.is_frozen():
-            raise Exception(f'Object is frozen, therefore key {key} cannot be modified')
-        if self.is_sealed() and key not in dict.keys(self):
-            raise Exception(f'Object is sealed, new key {key} cannot be added')
-
-        keys = key.split('.')
-        if len(keys) > 1:
-            listCont = False
-            if keys[1].startswith('['):
-                listCont = True
-                assert len(keys) == 2, KeyError('index key (e.g. [0]) can only appear last')
-                id = int(keys[1][1:-1])
-            p = dict.get(self, keys[0])
-            if p is None:
-                p = self._new() if not listCont else []
-                dict.__setitem__(self, keys[0], p)
-            elif not listCont:
-                assert isinstance(p, self._params_class()), f'Cannot assign to key {keys[0]} of type {type(keys[0])}. ' +\
-                                                            f'Need type {self._params_class()}.'
-                p._set_val_('.'.join(keys[1:]), val)  # pylint: disable=protected-access
-            else:
-                # assert isinstance(p, List), f'Cannot assign to key {keys[0]} of type {type(keys[0])}. Need type list'
-                assert np.ndim(p) == 1, f'Cannot assign to key {keys[0]} of type {type(keys[0])}. Need type list'
-                p[id] = val
-        else:
-            if isinstance(val, Mapping):  # and not isinstance(val, self._params_class()):
-                val = self._dict2params(val)
-            dict.__setitem__(self, key, val)

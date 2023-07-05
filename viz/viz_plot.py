@@ -7,8 +7,8 @@ import torch
 from dash import dcc
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
-from commons.params import NDict, Params
-from commons.logging import get_logger
+from params import NDict, Params
+from logger import get_logger
 from viz.viz_spec import PLOT_MARGINS, empty_graph, TensorSpec
 from viz.viz_commons import preprocess
 
@@ -212,7 +212,8 @@ def plot1(*,
           k: int,
           data_dict: NDict,
           global_options: List[str] = [],
-          tensor_options: Params) -> go.Figure:
+          tensor_options: Params,
+          _is_standalone: bool = False) -> go.Figure:
     """Create a plotly heatmap of the given tensor W"""
     def head_name(i: int) -> str:
         return f'$H^{{({i})}}$'
@@ -237,9 +238,10 @@ def plot1(*,
                         shared_xaxes='columns',  # if stack_heads else False,
                         horizontal_spacing=ps.horizontal_spacing,
                         vertical_spacing=ps.vertical_spacing,
-                        column_titles=[head_name(i) for i in range(ps.num_heads)] if not stack_heads else None,
+                        column_titles=[head_name(i) for i in range(ps.num_heads)] if (
+                            not stack_heads and ps.num_heads > 1) else [W_name] if _is_standalone else [f'${T_spec["latexName"]}$'],
                         row_titles=['Hist'],
-                        y_title=f'${T_spec["latexName"]}\\text{{: {yaxis_title} }}$',
+                        y_title=f'${T_spec["latexName"]}\\text{{: {yaxis_title} }}$' if not _is_standalone else yaxis_title,
                         specs=ps.subplot_specs,
                         x_title=xaxis_title)
 
@@ -272,14 +274,14 @@ def plot1(*,
                                   row=1, col=j+1)
                 else:
                     _V = _W[j][:, 0].cpu()
-                    fig.add_trace(go.Bar(# y=np.arange(len(_V)),  # np.arange(len(_V)) - ((len(_V) + 1) // 2),
-                                         x=_V,
-                                         marker=dict(coloraxis='coloraxis', showscale=False, color=_V),
-                                         name='',
-                                         showlegend=False,
-                                         orientation='h'
-                                         ),
-                                  row=1, col=j+1)
+                    fig.add_trace(go.Bar(  # y=np.arange(len(_V)),  # np.arange(len(_V)) - ((len(_V) + 1) // 2),
+                        x=_V,
+                        marker=dict(coloraxis='coloraxis', showscale=False, color=_V),
+                        name='',
+                        showlegend=False,
+                        orientation='h'
+                    ),
+                        row=1, col=j+1)
             elif plot_type == 'surface':
                 fig.add_trace(go.Surface(z=_W[j].cpu(),
                                          coloraxis='coloraxis',
@@ -361,14 +363,14 @@ def plot1(*,
                 else:
                     assert _W[i].shape[1] == 1
                     _V = _W[i][:, 0].cpu()
-                    fig.add_trace(go.Bar(# y=np.arange(len(_V)) - ((len(_V) + 1) // 2),
-                                         x=_V,
-                                         marker=dict(coloraxis='coloraxis', color=_V, showscale=False),
-                                         name='',
-                                         showlegend=False,
-                                         orientation='h'
-                                         ),
-                                  row=row, col=1)
+                    fig.add_trace(go.Bar(  # y=np.arange(len(_V)) - ((len(_V) + 1) // 2),
+                        x=_V,
+                        marker=dict(coloraxis='coloraxis', color=_V, showscale=False),
+                        name='',
+                        showlegend=False,
+                        orientation='h'
+                    ),
+                        row=row, col=1)
             else:
                 fig.add_trace(go.Heatmap(z=_W[i].cpu(),
                                          coloraxis='coloraxis',
@@ -378,7 +380,8 @@ def plot1(*,
                                          zsmooth=False),
                               row=row, col=1)
             if plot_type == 'heatmap':
-                fig.update_yaxes(title_text=head_name(i), range=[_W[i].shape[0]-1, 0], row=row, col=1)
+                fig.update_yaxes(title_text=head_name(i) if ps.num_heads > 1 else None,
+                                 range=[_W[i].shape[0]-1, 0], row=row, col=1)
 
         if plot_type in ['heatmap']:
             if (show_tokens and not transposed) or knn:
@@ -429,7 +432,7 @@ def plot1(*,
                        },
                       )
 
-    fig.update_layout(  # title_text=title,
+    fig.update_layout(
         autosize=False,
         width=ps.plot_width,
         height=ps.plot_height,

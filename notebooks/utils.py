@@ -2,6 +2,7 @@ from typing import List, Optional
 import os
 import pickle
 import math
+from tqdm import tqdm
 import transformers
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForSeq2SeqLM
 from datasets import load_dataset_builder
@@ -28,6 +29,8 @@ def is_enc_dec(model) -> bool:
                             transformers.BloomForCausalLM
                             )):
         return False
+    elif type(model).__name__ == 'RWForCausalLM':
+        return False
     else:
         raise NotImplementedError()
 
@@ -47,7 +50,8 @@ def load_model(model_name, device='cpu', parallelize: bool = False):
     try:
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            device_map='auto' if parallelize else None
+            device_map='auto' if parallelize else None,
+            trust_remote_code=True
         )
     except ValueError:
         model = transformers.AutoModelForSeq2SeqLM.from_pretrained(
@@ -113,6 +117,40 @@ def forward(text, tokenizer, model):
     return model_input, model_output
 
 
+def forward2(text, tokenizer, model, decoder_text: str = None):
+    model.eval()
+    device = model.device
+    enc_dec = is_enc_dec(model)
+    batch_size = 1 if isinstance(text, str) else len(text)
+    with torch.no_grad():
+        if not enc_dec:
+            model_input = tokenize(text, tokenizer, return_offsets_mapping=True)
+        else:
+            model_input = tokenize(text, tokenizer, add_special_tokens=False, return_offsets_mapping=True)
+            decoder_input = tokenize(decoder_text, tokenizer, add_special_tokens=True, return_offsets_mapping=True)
+            model_input['decoder_offset_mapping'] = decoder_input['offset_mapping']
+            model_input['decoder_input_ids'] = model._shift_right(decoder_input['input_ids'])
+            model_input['decoder_attention_mask'] = model._shift_right(decoder_input['attention_mask'])
+            model_input['decoder_attention_mask'][:, 0] = 1
+            # model_input['decoder_input_ids'] = decoder_input['input_ids']
+            # model_input['decoder_attention_mask'] = decoder_input['attention_mask']
+        for key in model_input.keys():
+            model_input[key] = model_input[key].to(device=device)
+        if not enc_dec:
+            model_output = model(input_ids=model_input['input_ids'],
+                                 attention_mask=model_input['attention_mask'],
+                                 output_hidden_states=True,
+                                 return_dict=True)
+        else:
+            model_output = model(input_ids=model_input['input_ids'],
+                                 attention_mask=model_input['attention_mask'],
+                                 decoder_input_ids=model_input['decoder_input_ids'],
+                                 decoder_attention_mask=model_input['decoder_attention_mask'],
+                                 output_hidden_states=True,
+                                 return_dict=True)
+    return model_input, model_output
+
+
 def generate(*, prompts: list, tokenizer, model, max_new_tokens=100, gen_args: str, batch_size: int):
     gen_kwargs = dict(
         greedy=dict(
@@ -140,7 +178,7 @@ def generate(*, prompts: list, tokenizer, model, max_new_tokens=100, gen_args: s
     device = model.device
     seqs = []
     with torch.no_grad():
-        for batch_start in range(0, len(prompts), batch_size):
+        for batch_start in tqdm(range(0, len(prompts), batch_size)):
             model_input = tokenizer(prompts[batch_start: batch_start + batch_size],
                                     return_tensors='pt', return_attention_mask=True, padding=True)
             input_ids = model_input.input_ids.to(device=device)
