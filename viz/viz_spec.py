@@ -243,6 +243,68 @@ class AttributionsSpec(TensorSpec):
         self.sidebar_controls['row-or-col'].default = 'row'
 
 
+class AttentionSpec(TensorSpec):
+    """Attention tensor spec"""
+
+    def __init__(self,
+                 *,
+                 key: str,
+                 latexName: Optional[str] = None,
+                 htmlName: Optional[str] = None,
+                 xaxis_title: str = 'Key Pos',
+                 yaxis_title: str = 'Query Pos',
+                 show_tokens: bool = True,
+                 knn: bool = False,
+                 colorscale: str = 'cividis_r',
+                 **kwargs: Any) -> None:
+        super().__init__(
+            key=key,
+            type_='Attn',
+            htmlName=htmlName or key,
+            latexName=(latexName or htmlName or key),
+            colorscale=colorscale,
+            draw_graph2=False,
+            xaxis_title=xaxis_title,
+            yaxis_title=yaxis_title,
+            show_tokens=show_tokens,
+            knn=knn,
+            **kwargs)
+        self.sidebar_controls['row-or-col'].default = 'row'
+
+
+class PosEncodingSpec(TensorSpec):
+    """Position Encodings tensor spec"""
+
+    def __init__(self,
+                 *,
+                 key: str,
+                 latexName: Optional[str] = None,
+                 htmlName: Optional[str] = None,
+                 xaxis_title: str = 'Pos Encoding',
+                 yaxis_title: str = 'Key Pos',
+                 show_tokens: bool = False,
+                 knn: bool = False,
+                 colorscale: str = 'cividis_r',
+                 share_x_axis: bool = 'all',  # 'all' | 'columns' | False
+                 share_y_axis: bool = 'all',  # 'all' | 'rows' | False
+                 **kwargs: Any) -> None:
+        super().__init__(
+            key=key,
+            type_='Attn',
+            htmlName=htmlName or key,
+            latexName=(latexName or htmlName or key),
+            colorscale=colorscale,
+            draw_graph2=False,
+            xaxis_title=xaxis_title,
+            yaxis_title=yaxis_title,
+            show_tokens=show_tokens,
+            knn=knn,
+            share_x_axis=share_x_axis,
+            share_y_axis=share_y_axis,
+            **kwargs)
+        self.sidebar_controls['row-or-col'].default = 'row'
+
+
 ENCODER_LAYER_TENSOR_SPEC = OrderedDict((spec.key, spec)  # type: ignore
                                         for spec in [
     # List them in the order you want them displayed

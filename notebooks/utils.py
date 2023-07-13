@@ -1,10 +1,11 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import os
 import pickle
 import math
 from tqdm import tqdm
 import transformers
-from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForSeq2SeqLM
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForSeq2SeqLM, T5ForConditionalGeneration
+
 from datasets import load_dataset_builder
 from datasets import load_dataset
 import torch
@@ -15,6 +16,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import ray
 import pandas as pd
+from params import Params, NDict
+from viz.viz_knn import knn_index
 
 
 def is_enc_dec(model) -> bool:
@@ -30,6 +33,10 @@ def is_enc_dec(model) -> bool:
                             )):
         return False
     elif type(model).__name__ == 'RWForCausalLM':
+        return False
+    elif type(model).__name__ == 'FalconForCausalLM':
+        return False
+    elif type(model).__name__.endswith('ForCausalLM'):
         return False
     else:
         raise NotImplementedError()
@@ -117,7 +124,7 @@ def forward(text, tokenizer, model):
     return model_input, model_output
 
 
-def forward2(text, tokenizer, model, decoder_text: str = None):
+def forward2(text, tokenizer, model, decoder_text: str = ''):
     model.eval()
     device = model.device
     enc_dec = is_enc_dec(model)
@@ -140,6 +147,7 @@ def forward2(text, tokenizer, model, decoder_text: str = None):
             model_output = model(input_ids=model_input['input_ids'],
                                  attention_mask=model_input['attention_mask'],
                                  output_hidden_states=True,
+                                 output_attentions=True,
                                  return_dict=True)
         else:
             model_output = model(input_ids=model_input['input_ids'],
@@ -147,6 +155,7 @@ def forward2(text, tokenizer, model, decoder_text: str = None):
                                  decoder_input_ids=model_input['decoder_input_ids'],
                                  decoder_attention_mask=model_input['decoder_attention_mask'],
                                  output_hidden_states=True,
+                                 output_attentions=True,
                                  return_dict=True)
     return model_input, model_output
 
@@ -197,6 +206,148 @@ def generate(*, prompts: list, tokenizer, model, max_new_tokens=100, gen_args: s
             outputs = model.generate(**kwargs)
             seqs.extend(tokenizer.batch_decode(outputs, skip_special_tokens=True))
     return seqs
+
+
+def hook_activations_t5(model: T5ForConditionalGeneration):
+    module_names = ['encoder.final_layer_norm',
+                    'decoder.final_layer_norm',
+                    ]
+    param_name = NDict()
+    for _l in range(len(model.encoder.block)):
+        module_names.extend([f'encoder.block.{_l}.layer.0.layer_norm',
+                             f'encoder.block.{_l}.layer.0.SelfAttention.q',
+                             f'encoder.block.{_l}.layer.0.SelfAttention.k',
+                             f'encoder.block.{_l}.layer.0.SelfAttention.v',
+                             f'encoder.block.{_l}.layer.0.SelfAttention.o',
+                             f'encoder.block.{_l}.layer.0.SelfAttention',
+                             f'encoder.block.{_l}.layer.0',
+                             f'encoder.block.{_l}.layer.1.layer_norm',
+                             f'encoder.block.{_l}.layer.1.DenseReluDense.wi',
+                             f'encoder.block.{_l}.layer.1.DenseReluDense.wo',
+                             f'encoder.block.{_l}.layer.1'
+                             ])
+        param_name[f'encoder.block.{_l}.layer.0'] = f'encoder.block.{_l}.layer.0.o+'
+        param_name[f'encoder.block.{_l}.layer.1'] = f'encoder.block.{_l}.layer.1.ff2+'
+    for _l in range(len(model.decoder.block)):
+        module_names.extend([f'decoder.block.{_l}.layer.0.layer_norm',
+                             f'decoder.block.{_l}.layer.0.SelfAttention.q',
+                             f'decoder.block.{_l}.layer.0.SelfAttention.k',
+                             f'decoder.block.{_l}.layer.0.SelfAttention.v',
+                             f'decoder.block.{_l}.layer.0.SelfAttention.o',
+                             f'decoder.block.{_l}.layer.0.SelfAttention',
+                             f'decoder.block.{_l}.layer.0',
+                             f'decoder.block.{_l}.layer.1.layer_norm',
+                             f'decoder.block.{_l}.layer.1.EncDecAttention.q',
+                             f'decoder.block.{_l}.layer.1.EncDecAttention.k',
+                             f'decoder.block.{_l}.layer.1.EncDecAttention.v',
+                             f'decoder.block.{_l}.layer.1.EncDecAttention.o',
+                             f'decoder.block.{_l}.layer.1.EncDecAttention',
+                             f'decoder.block.{_l}.layer.1',
+                             f'decoder.block.{_l}.layer.2.layer_norm',
+                             f'decoder.block.{_l}.layer.2.DenseReluDense.wi',
+                             f'decoder.block.{_l}.layer.2.DenseReluDense.wo',
+                             f'decoder.block.{_l}.layer.2'
+                             ])
+        param_name[f'decoder.block.{_l}.layer.0'] = f'decoder.block.{_l}.layer.0.o+'
+        param_name[f'decoder.block.{_l}.layer.1'] = f'decoder.block.{_l}.layer.1.o+'
+        param_name[f'decoder.block.{_l}.layer.2'] = f'decoder.block.{_l}.layer.2.ff2+'
+
+    activations_dict: Dict = Params({'input_embeddings': []})
+    module_dict = dict(model.named_modules())
+    for module_name in module_names:
+        def hook(_module: torch.nn.Module, input_: Any, output: Any, name: str = module_name) -> None:
+            if name.endswith('.SelfAttention') or name.endswith('.EncDecAttention'):
+                if len(output) >= 5:
+                    # T5Attention.forward was enhanced to output attention scores
+                    activations_dict[f'{name}.attention_score'] = output[4].detach().squeeze(0)
+                activations_dict[f'{name}.position_bias'] = output[2].detach().squeeze(0)
+            else:
+                activations_dict[param_name[name] or name] = (
+                    output[0] if isinstance(output, tuple) else output).detach().squeeze(0)
+            if name.endswith('.DenseReluDense.wo'):
+                activations_dict[name + ':in'] = input_[0].detach().squeeze(0)
+        try:
+            module_dict[module_name].register_forward_hook(hook)
+        except KeyError:
+            print(f'Could not find activation: {module_name}')
+
+    def collect_embeddings(_embedding_module: torch.nn.Module, _input: Any, output: torch.Tensor) -> None:
+        """Collect encoder and decoder input-embeddings"""
+        activations_dict['input_embeddings'].append(output.detach().clone())
+    module_dict['shared'].register_forward_hook(collect_embeddings)
+
+    return activations_dict
+
+
+def strip_t5_token(s: str) -> str:
+    """Strip leading underscores from sentencepice tokens"""
+    return s.lstrip(chr(9601))
+
+
+def get_activations_t5(context, completion, *, model=None, tokenizer=None, model_name, distance_measure='IP', NUM_GPUS_PER_INSTANCE):
+    assert distance_measure in ['IP', 'L2']
+    assert isinstance(context, str)
+    assert isinstance(completion, str)
+    if model is None:
+        model, tokenizer = load_model(model_name, device='0', parallelize=(NUM_GPUS_PER_INSTANCE > 1))
+    activations_dict = hook_activations_t5(model)
+    model_input, model_output = forward2(context, tokenizer, model, decoder_text=completion)
+
+    data_dict = NDict({k: v.cpu().detach() for k, v in model_input.items()})
+    data_dict['logits'] = model_output.logits.cpu().detach()
+    data_dict['encoder_hidden_states'] = [layer.cpu().detach() for layer in model_output.encoder_hidden_states]
+    data_dict['decoder_hidden_states'] = [layer.cpu().detach() for layer in model_output.decoder_hidden_states]
+    data_dict['encoder_last_hidden_state'] = model_output.encoder_last_hidden_state.cpu().detach()
+    data_dict.activations = activations_dict
+    data_dict.embedding_vectors = model.get_input_embeddings().weight.cpu().detach()
+    data_dict['inp_index'] = knn_index(data_dict.embedding_vectors, distance_measure)
+    data_dict.tokenizer = tokenizer
+    data_dict.input_tokens_unstripped = tokenizer.convert_ids_to_tokens(model_input.input_ids.squeeze(0))
+    data_dict.input_tokens = [strip_t5_token(token) for token in data_dict.input_tokens_unstripped]
+    if 'decoder_input_ids' in model_input:
+        data_dict.decoder_input_tokens_unstripped = tokenizer.convert_ids_to_tokens(model_input.decoder_input_ids.squeeze(0))
+        data_dict.decoder_input_tokens = [strip_t5_token(token) for token in data_dict.decoder_input_tokens_unstripped]
+
+    return model, tokenizer, data_dict
+
+
+def hook_activations_falcon(model, activations_dict):
+    # list(dict(model.named_modules()).keys())
+    for module_name, module in model.named_modules():
+        def hook(_module: torch.nn.Module, input_: Any, output: Any, name: str = module_name) -> None:
+            if isinstance(output, torch.Tensor):
+                activations_dict[name] = output.cpu().detach()
+            else:
+                print(f'Skipping activation {name or module_name}')
+        if 'layernorm' in module_name or 'ln' in module_name or 'word_embeddings' in module_name:
+            module.register_forward_hook(hook)
+        else:
+            print(f'Skipping module {module_name}')
+
+
+def get_activations_falcon(text, *, model=None, model_name, tokenizer=None, distance_measure='IP', NUM_GPUS_PER_INSTANCE):
+    assert distance_measure in ['IP', 'L2']
+    assert isinstance(text, str)
+    if model is None:
+        model, tokenizer = load_model(model_name, device='0', parallelize=(NUM_GPUS_PER_INSTANCE > 1))
+    activations_dict = NDict()
+    hook_activations_falcon(model, activations_dict)
+    model_input, model_output = forward2(text, tokenizer, model)
+
+    data_dict = NDict({k: v.cpu().detach() for k, v in model_input.items()})
+    data_dict['logits'] = model_output.logits.cpu().detach()
+    data_dict['hidden_states'] = [layer.cpu().detach() for layer in model_output.hidden_states]
+    data_dict.activations = activations_dict
+    data_dict.embedding_vectors = model.get_input_embeddings().weight.cpu().detach()
+    data_dict['inp_index'] = knn_index(data_dict.embedding_vectors, distance_measure)
+    data_dict.tokenizer = tokenizer
+    data_dict.input_tokens_unstripped = tokenizer.convert_ids_to_tokens(model_input.input_ids.squeeze(0))
+    data_dict.input_tokens = data_dict.input_tokens_unstripped  # [_strip(token) for token in data_dict.input_tokens_unstripped]
+    if 'decoder_input_ids' in model_input:
+        data_dict.decoder_input_tokens_unstripped = tokenizer.convert_ids_to_tokens(model_input.decoder_input_ids)
+        data_dict.decoder_input_tokens = data_dict.decoder_input_tokens_unstripped  # [_strip(token) for token in data_dict.decoder_input_tokens_unstripped]
+
+    return model, tokenizer, data_dict
 
 
 def get_sim(text, tokenizer, model):
@@ -490,3 +641,4 @@ def remove_prompt(prob, att_mask, prompt_token_lens):
         _t_prob = prob[i, prompt_token_lens[i]:prompt_token_lens[i] + _t_len]
         prob_list.append(_t_prob)
     return stack(prob_list)
+

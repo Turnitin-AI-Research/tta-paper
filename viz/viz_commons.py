@@ -186,3 +186,8 @@ def get_knn(vectors: torch.Tensor, data_dict: NDict, K: int) -> np.ndarray:
     _, _nn = inp_index.search(vectors.contiguous().numpy(), K)
     nn = np.asarray([_ids_to_tokens(_nn[:, k], data_dict['tokenizer']) for k in range(K)])  # (K, seq-len)
     return nn  # (#vecs,)
+
+
+def mid_point(n):
+    """Return the mid point of a sequence"""
+    return n // 2

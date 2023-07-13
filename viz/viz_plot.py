@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 from params import NDict, Params
 from logger import get_logger
 from viz.viz_spec import PLOT_MARGINS, empty_graph, TensorSpec
-from viz.viz_commons import preprocess
+from viz.viz_commons import preprocess, mid_point
 
 _LOGGER = get_logger(os.path.basename(__file__))
 
@@ -213,7 +213,8 @@ def plot1(*,
           data_dict: NDict,
           global_options: List[str] = [],
           tensor_options: Params,
-          _is_standalone: bool = False) -> go.Figure:
+          _is_standalone: bool = False,
+          _bar_x_ticks=None) -> go.Figure:
     """Create a plotly heatmap of the given tensor W"""
     def head_name(i: int) -> str:
         return f'$H^{{({i})}}$'
@@ -234,13 +235,13 @@ def plot1(*,
                         row_heights=ps.row_dist,
                         cols=ps.num_cols,
                         column_widths=ps.col_dist,
-                        shared_yaxes=False,
-                        shared_xaxes='columns',  # if stack_heads else False,
+                        shared_yaxes=True,
+                        shared_xaxes=True,  # if stack_heads else False,
                         horizontal_spacing=ps.horizontal_spacing,
                         vertical_spacing=ps.vertical_spacing,
                         column_titles=[head_name(i) for i in range(ps.num_heads)] if (
                             not stack_heads and ps.num_heads > 1) else [W_name] if _is_standalone else [f'${T_spec["latexName"]}$'],
-                        row_titles=['Hist'],
+                        row_titles=['Histogram'],
                         y_title=f'${T_spec["latexName"]}\\text{{: {yaxis_title} }}$' if not _is_standalone else yaxis_title,
                         specs=ps.subplot_specs,
                         x_title=xaxis_title)
@@ -265,7 +266,7 @@ def plot1(*,
             if plot_type == 'bar':
                 if _W[j].shape[0] == 1:
                     _V = _W[j][0].cpu()
-                    fig.add_trace(go.Bar(x=np.arange(len(_V)) - ((len(_V) + 1) // 2) if W_name.lower() == 'pos' else None,  # np.arange(len(_V)),
+                    fig.add_trace(go.Bar(x=_bar_x_ticks,  # np.arange(len(_V)),
                                          y=_V,
                                          marker=dict(coloraxis='coloraxis', showscale=False, color=_V),
                                          name='',
@@ -353,7 +354,7 @@ def plot1(*,
             if plot_type == 'bar':
                 if _W[i].shape[0] == 1:
                     _V = _W[i][0].cpu()
-                    fig.add_trace(go.Bar(x=np.arange(len(_V)) - ((len(_V) + 1) // 2) if W_name.lower() == 'pos' else None,
+                    fig.add_trace(go.Bar(x=_bar_x_ticks,
                                          y=_V,
                                          marker=dict(coloraxis='coloraxis', color=_V, showscale=False),
                                          name='',
