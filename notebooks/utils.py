@@ -124,7 +124,7 @@ def forward(text, tokenizer, model):
     return model_input, model_output
 
 
-def forward2(text, tokenizer, model, decoder_text: str = ''):
+def forward2(text, tokenizer, model, decoder_text: str = '', output_attentions: bool = True):
     model.eval()
     device = model.device
     enc_dec = is_enc_dec(model)
@@ -147,7 +147,7 @@ def forward2(text, tokenizer, model, decoder_text: str = ''):
             model_output = model(input_ids=model_input['input_ids'],
                                  attention_mask=model_input['attention_mask'],
                                  output_hidden_states=True,
-                                 output_attentions=True,
+                                 output_attentions=output_attentions,
                                  return_dict=True)
         else:
             model_output = model(input_ids=model_input['input_ids'],
@@ -155,7 +155,7 @@ def forward2(text, tokenizer, model, decoder_text: str = ''):
                                  decoder_input_ids=model_input['decoder_input_ids'],
                                  decoder_attention_mask=model_input['decoder_attention_mask'],
                                  output_hidden_states=True,
-                                 output_attentions=True,
+                                 output_attentions=output_attentions,
                                  return_dict=True)
     return model_input, model_output
 
@@ -344,6 +344,42 @@ def get_activations_falcon(text, *, model=None, model_name, tokenizer=None, dist
     data_dict.embedding_vectors = model.get_input_embeddings().weight.cpu().detach()
     data_dict['inp_index'] = knn_index(data_dict.embedding_vectors, distance_measure)
     data_dict.tokenizer = tokenizer
+    data_dict.input_tokens_unstripped = tokenizer.convert_ids_to_tokens(model_input.input_ids.squeeze(0))
+    data_dict.input_tokens = data_dict.input_tokens_unstripped  # [_strip(token) for token in data_dict.input_tokens_unstripped]
+    if 'decoder_input_ids' in model_input:
+        data_dict.decoder_input_tokens_unstripped = tokenizer.convert_ids_to_tokens(model_input.decoder_input_ids)
+        data_dict.decoder_input_tokens = data_dict.decoder_input_tokens_unstripped  # [_strip(token) for token in data_dict.decoder_input_tokens_unstripped]
+
+    return model, tokenizer, data_dict
+
+
+def hook_activations_gpt_neo(model, activations_dict):
+    # list(dict(model.named_modules()).keys())
+    for module_name, module in model.named_modules():
+        def hook(_module: torch.nn.Module, input_: Any, output: Any, name: str = module_name) -> None:
+            if isinstance(output, torch.Tensor):
+                activations_dict[name] = output.cpu().detach()
+        if 'layernorm' in module_name or 'ln' in module_name or 'word_embeddings' in module_name:
+            module.register_forward_hook(hook)
+
+
+def get_activations_gpt_neo(text, *, model=None, model_name, tokenizer=None, distance_measure='IP', NUM_GPUS_PER_INSTANCE):
+    assert distance_measure in ['IP', 'L2']
+    assert isinstance(text, str)
+    if model is None:
+        model, tokenizer = load_model(model_name, device='0', parallelize=(NUM_GPUS_PER_INSTANCE > 1))
+    activations_dict = NDict()
+    hook_activations_gpt_neo(model, activations_dict)
+    model_input, model_output = forward2(text, tokenizer, model)
+
+    data_dict = NDict({k: v.cpu().detach() for k, v in model_input.items()})
+    data_dict['logits'] = model_output.logits.cpu().detach()
+    data_dict['hidden_states'] = [layer.cpu().detach() for layer in model_output.hidden_states]
+    data_dict.activations = activations_dict
+    data_dict.embedding_vectors = model.get_input_embeddings().weight.cpu().detach()
+    data_dict['inp_index'] = knn_index(data_dict.embedding_vectors, distance_measure)
+    data_dict.tokenizer = tokenizer
+    data_dict.attention_weights = [t.cpu().detach() for t in model_output.attentions]
     data_dict.input_tokens_unstripped = tokenizer.convert_ids_to_tokens(model_input.input_ids.squeeze(0))
     data_dict.input_tokens = data_dict.input_tokens_unstripped  # [_strip(token) for token in data_dict.input_tokens_unstripped]
     if 'decoder_input_ids' in model_input:

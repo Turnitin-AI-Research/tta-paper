@@ -68,6 +68,8 @@ def plot_attention_maps(*,
         position_bias_kernel = position_bias[:, show_row:show_row+1]  # (H, 1, S) = (1, 1, S)
         if show_kernel_only:
             position_bias = None
+    else:
+        position_bias_kernel = None
 
     OutputPathPrefix = f"figures/{ModelName.replace('/', '-')}/dataum_id={datum_id.replace('/', '-')}-stack={stack}-layer={layer}-head={head}"
     titles = [f'$Q_{{{head}}}.K_{{{head}}}^T$',
