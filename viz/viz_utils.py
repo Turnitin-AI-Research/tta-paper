@@ -54,10 +54,10 @@ def write_iframe(fig: go.Figure, figdir=None) -> str:
 
 
 def plot_attention_maps(*,
-                        stack='encoder',
-                        attention_score=None, position_bias=None, show_kernel_only=False, head, layer,
+                        stack, head, layer,
+                        attention_score=None, position_bias=None, show_kernel_only=False, attention_weights=None,
                         ModelName, show_tokens=False, datum_id, data_dict,
-                        fig_format='iframe_connected', figdir=None, stack_heads=False,
+                        fig_format='iframe_connected', tempdir=None, stack_heads=False,
                         hscale=None):
     if position_bias is not None:
         if stack == 'decoder':
@@ -69,10 +69,13 @@ def plot_attention_maps(*,
         if show_kernel_only:
             position_bias = None
 
-    titles = [f'$Q_{head}.K_{head}^T$',
-              f'Position Bias of Head {head}',
-              f'Position Bias Kernel of Head {head}',
-              f'Combined Attention Score of Head {head}']
+    OutputPathPrefix = f"figures/{ModelName.replace('/', '-')}/dataum_id={datum_id.replace('/', '-')}-stack={stack}-layer={layer}-head={head}"
+    titles = [f'$Q_{{{head}}}.K_{{{head}}}^T$',
+              f'Position Bias: {stack} layer {layer}, head {head}',
+              f'Position Bias Kernel: {stack} layer {layer}, head {head}',
+              f'Combined Attention Score: {stack} layer {layer}, head {head}',
+              f'Final Attention Weights (after softmax): {stack} layer {layer}, head {head}'
+              ]
     input_tokens = data_dict.input_tokens_unstripped if show_tokens else None
 
     os.makedirs('figures', exist_ok=True)
@@ -93,8 +96,11 @@ def plot_attention_maps(*,
                      show_y_tokens=show_tokens,
                      _is_standalone=True
                      )
-        show_fig(fig1, fig_format, figdir=figdir)
-        OutputFileName = f"figures/{ModelName.replace('/', '-')}/{datum_id.replace('/', '-')}-{titles[0]}"
+        OutputFileName = OutputPathPrefix + f"-{titles[0]}"
+        if fig_format is not None:
+            show_fig(fig1, fig_format, figdir=tempdir)
+        else:
+            print(f'Saving to {OutputFileName}')
         fig1.write_image(file=OutputFileName + '.pdf')
     if position_bias is not None:
         fig2 = plot1(W=position_bias,
@@ -113,8 +119,11 @@ def plot_attention_maps(*,
                      show_y_tokens=show_tokens,
                      _is_standalone=True
                      )
-        show_fig(fig2, fig_format, figdir=figdir)
-        OutputFileName = f"figures/{ModelName.replace('/', '-')}/{datum_id.replace('/', '-')}-{titles[1]}"
+        OutputFileName = OutputPathPrefix + f"-{titles[1]}"
+        if fig_format is not None:
+            show_fig(fig2, fig_format, figdir=tempdir)
+        else:
+            print(f'Saving to {OutputFileName}')
         fig2.write_image(file=OutputFileName + '.pdf')
 
     if position_bias_kernel is not None:
@@ -135,10 +144,13 @@ def plot_attention_maps(*,
                      _is_standalone=True,
                      _bar_x_ticks=kernel_x_ticks
                      )
-        show_fig(fig3, fig_format, figdir=figdir)
-        OutputFileName = f"figures/{ModelName.replace('/', '-')}/{datum_id.replace('/', '-')}-{titles[2]}"
+        OutputFileName = OutputPathPrefix + f"-{titles[2]}"
+        if fig_format is not None:
+            show_fig(fig3, fig_format, figdir=tempdir)
+        else:
+            print(f'Saving to {OutputFileName}')
         fig3.write_image(file=OutputFileName + '.pdf')
-    if attention_score:
+    if attention_score is not None:
         fig4 = plot1(W=attention_score,
                      W_name=titles[3],
                      T_spec=AttentionSpec(key=None, xaxis_title='Key Position', yaxis_title='Query Position'),
@@ -155,8 +167,35 @@ def plot_attention_maps(*,
                      show_y_tokens=show_tokens,
                      _is_standalone=True
                      )
-        show_fig(fig4, fig_format, figdir=figdir)
-        OutputFileName = f"figures/{ModelName.replace('/', '-')}/{datum_id.replace('/', '-')}-{titles[3]}"
+        OutputFileName = OutputPathPrefix + f"-{titles[3]}"
+        if fig_format is not None:
+            show_fig(fig4, fig_format, figdir=tempdir)
+        else:
+            print(f'Saving to {OutputFileName}')
         fig4.write_image(file=OutputFileName + '.pdf')
+
+    if attention_weights is not None:
+        fig5 = plot1(W=attention_weights,
+                     W_name=titles[4],
+                     T_spec=AttentionSpec(key=None, xaxis_title='Key Position', yaxis_title='Query Position'),
+                     colorscale='cividis_r',
+                     vscale=1, hscale=hscale or 1,
+                     stack_heads=stack_heads,
+                     input_tokens=input_tokens,
+                     knn=False,
+                     k=1,
+                     cmid=None,
+                     data_dict=data_dict,
+                     tensor_options=Params(checklist=[], plot_type='heatmap'),
+                     show_tokens=show_tokens,
+                     show_y_tokens=show_tokens,
+                     _is_standalone=True
+                     )
+        OutputFileName = OutputPathPrefix + f"-{titles[4]}"
+        if fig_format is not None:
+            show_fig(fig5, fig_format, figdir=tempdir)
+        else:
+            print(f'Saving to {OutputFileName}')
+        fig5.write_image(file=OutputFileName + '.pdf')
         #  fig.write_image(file=OutputFileName + '.svg')
         #  fig.write_image(file=OutputFileName + '.png')

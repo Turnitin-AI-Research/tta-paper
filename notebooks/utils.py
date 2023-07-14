@@ -259,13 +259,14 @@ def hook_activations_t5(model: T5ForConditionalGeneration):
             if name.endswith('.SelfAttention') or name.endswith('.EncDecAttention'):
                 if len(output) >= 5:
                     # T5Attention.forward was enhanced to output attention scores
-                    activations_dict[f'{name}.attention_score'] = output[4].detach().squeeze(0)
-                activations_dict[f'{name}.position_bias'] = output[2].detach().squeeze(0)
+                    activations_dict[f'{name}.attention_score'] = output[4].cpu().detach().squeeze(0)
+                    # activations_dict[f'{name}.attention_weights'] = output[3].cpu().detach().squeeze(0)
+                activations_dict[f'{name}.position_bias'] = output[2].cpu().detach().squeeze(0)
             else:
                 activations_dict[param_name[name] or name] = (
-                    output[0] if isinstance(output, tuple) else output).detach().squeeze(0)
+                    output[0] if isinstance(output, tuple) else output).cpu().detach().squeeze(0)
             if name.endswith('.DenseReluDense.wo'):
-                activations_dict[name + ':in'] = input_[0].detach().squeeze(0)
+                activations_dict[name + ':in'] = input_[0].cpu().detach().squeeze(0)
         try:
             module_dict[module_name].register_forward_hook(hook)
         except KeyError:
@@ -273,7 +274,7 @@ def hook_activations_t5(model: T5ForConditionalGeneration):
 
     def collect_embeddings(_embedding_module: torch.nn.Module, _input: Any, output: torch.Tensor) -> None:
         """Collect encoder and decoder input-embeddings"""
-        activations_dict['input_embeddings'].append(output.detach().clone())
+        activations_dict['input_embeddings'].append(output.cpu().detach())
     module_dict['shared'].register_forward_hook(collect_embeddings)
 
     return activations_dict
@@ -304,6 +305,8 @@ def get_activations_t5(context, completion, *, model=None, tokenizer=None, model
     data_dict.tokenizer = tokenizer
     data_dict.input_tokens_unstripped = tokenizer.convert_ids_to_tokens(model_input.input_ids.squeeze(0))
     data_dict.input_tokens = [strip_t5_token(token) for token in data_dict.input_tokens_unstripped]
+    data_dict.encoder_attention_weights = [t.cpu().detach() for t in model_output.encoder_attentions]
+    data_dict.decoder_attention_weights = [t.cpu().detach() for t in model_output.decoder_attentions]
     if 'decoder_input_ids' in model_input:
         data_dict.decoder_input_tokens_unstripped = tokenizer.convert_ids_to_tokens(model_input.decoder_input_ids.squeeze(0))
         data_dict.decoder_input_tokens = [strip_t5_token(token) for token in data_dict.decoder_input_tokens_unstripped]
