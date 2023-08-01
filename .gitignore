@@ -134,3 +134,4 @@ _cache_model/
 *.pkl
 cache/
 notebooks/figures/
+.vscode/

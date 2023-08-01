@@ -21,13 +21,14 @@ $ pip-compile tta.in > tta.txt
 $ pip-sync tta.txt
 ```
 
-## GPUs Machine
+## GPUs / Machine
 We used a linux machine running Ubuntu 20.04 and having 8 Nvidia 2080-Ti GPUs. CUDA dependencies are automatically installed during the python environment setup (see above).
 
 ## Vizualization Notebooks
 The following notebook outputs were used in the paper:
 1. Attention layer activations and position kernels:
     * "notebooks/viz_attention_maps T5.ipynb"
+        * requires modifying T5 to emit the attention-scores before softmax. See the file notebooks/modeling_t5.py for the necessary modifications.
 1. Similarity maps:
     * "notebooks/viz_similarity_maps T5.ipynb" for T5 and Flan-T5 models
     * "notebooks/viz_similarity_maps Falcon.ipynb" for the falcon-7b model
