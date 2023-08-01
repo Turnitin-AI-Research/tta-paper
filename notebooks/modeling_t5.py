@@ -575,8 +575,8 @@ class T5Attention(nn.Module):
         outputs = (attn_output,) + (present_key_value_state,) + (position_bias,)
 
         if output_attentions:
-            # outputs = outputs + (attn_weights,)
-            outputs = outputs + (attn_weights, scores)  # attention scores inserted by ssingh for hooked capture
+            # outputs = outputs + (attn_weights,)  # commented out for tta-paper
+            outputs = outputs + (attn_weights, scores)  # attention scores inserted for tta-paper for hooked capture
         return outputs
 
 
@@ -608,8 +608,8 @@ class T5LayerSelfAttention(nn.Module):
             output_attentions=output_attentions,
         )
         hidden_states = hidden_states + self.dropout(attention_output[0])
-        if output_attentions:
-            attention_output = attention_output[:-1]  # remove scores inserted by ssingh
+        if output_attentions:  # This line inserted for tta-paper
+            attention_output = attention_output[:-1]  # remove scores inserted for tta-paper
         outputs = (hidden_states,) + attention_output[1:]  # add attentions if we output them
         return outputs
 
@@ -646,8 +646,8 @@ class T5LayerCrossAttention(nn.Module):
             output_attentions=output_attentions,
         )
         layer_output = hidden_states + self.dropout(attention_output[0])
-        if output_attentions:
-            attention_output = attention_output[:-1]  # remove scores inserted by ssingh
+        if output_attentions:  # This line inserted by ssingh for tta-paper
+            attention_output = attention_output[:-1]  # remove scores inserted for tta-paper
         outputs = (layer_output,) + attention_output[1:]  # add attentions if we output them
         return outputs
 

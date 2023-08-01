@@ -12,14 +12,17 @@ $ pip-sync env_files/tta.txt
 ```
 All notebooks and code runs under the above virtual environment.
 
-`env_files` has files tta.in where all the environment packages are listed. This gets compiled into a requirements file: tta.txt which is
-used to populate the python virtual environment as above. Should you need to recreate the environment file tta.txt follow these instructions:
+`env_files` has files tta.in where all the environment packages are listed. This gets compiled into a requirements file: tta.txt which is used to populate the python virtual environment as above. Should you need to recreate the environment file tta.txt follow these instructions:
 
 ```
 $ cd env_files
 $ pip-compile tta.in > tta.txt
 $ pip-sync tta.txt
 ```
+
+### Optionally modify modeling_t5.py
+If you want to run the notebook notebooks/viz_attention_maps T5.ipynb, then you'll need to modify some code in .venv_tta/lib/python3.8/site-packages/transformers/models/t5/modeling_t5.py. In order to do this, search for "tta-paper" in the file notebooks/modeling_t5.py - about 6 lines - and make the same changes in your transformers package's modeling_t5.py file.
+
 
 ## GPUs / Machine
 We used a linux machine running Ubuntu 20.04 and having 8 Nvidia 2080-Ti GPUs. CUDA dependencies are automatically installed during the python environment setup (see above).
