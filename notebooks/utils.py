@@ -212,7 +212,7 @@ def hook_activations_t5(model: T5ForConditionalGeneration):
     module_names = ['encoder.final_layer_norm',
                     'decoder.final_layer_norm',
                     ]
-    param_name = NDict()
+    param_name = Params()
     for _l in range(len(model.encoder.block)):
         module_names.extend([f'encoder.block.{_l}.layer.0.layer_norm',
                              f'encoder.block.{_l}.layer.0.SelfAttention.q',
@@ -256,6 +256,7 @@ def hook_activations_t5(model: T5ForConditionalGeneration):
     module_dict = dict(model.named_modules())
     for module_name in module_names:
         def hook(_module: torch.nn.Module, input_: Any, output: Any, name: str = module_name) -> None:
+            # print(f'Hooking {param_name[name] or name}')
             if name.endswith('.SelfAttention') or name.endswith('.EncDecAttention'):
                 if len(output) >= 5:
                     # T5Attention.forward was enhanced to output attention scores
