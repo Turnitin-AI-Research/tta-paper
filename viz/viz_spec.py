@@ -17,7 +17,7 @@ SEQUENTIAL_UCS_COLORMAPS = ['cividis_r', 'viridis_r', 'cividis', 'viridis']
 # on the colorscale
 # See https://plotly.com/python/builtin-colorscales/
 DIVERGING_COLORMAPS = ['BrBG', 'icefire', 'icefire_r', 'portland']
-PLOT_MARGINS = Params({'t': 50, 'b': 100, 'r': 100, 'l': 100, 'autoexpand': False}).freeze()
+PLOT_MARGINS = Params({'t': 50, 'b': 100, 'r': 100, 'l': 100, 'autoexpand': False})
 COLORSCALES = px.colors.named_colorscales()
 COLORSCALES = sorted(COLORSCALES + [c + '_r' for c in COLORSCALES])
 
@@ -55,14 +55,14 @@ class TensorSpec(NDict):
                  prob_rows: bool = False,
                  **kwargs: Any) -> None:
         super().__init__(
-            dict(
+            NDict(
                 key=key,
                 type=type_,
                 htmlName=htmlName or key,
                 latexName=latexName or htmlName or key,
                 colorscale=colorscale,
                 draw_graph2=draw_graph2,
-                sidebar_controls={
+                sidebar_controls=NDict({
                     'hscale': NDict(
                         label='Horizontal Scale',
                         type=dcc.Dropdown,
@@ -152,7 +152,7 @@ class TensorSpec(NDict):
                         default='col',
                         persist=False
                     )
-                },
+                }),
                 xaxis_title=xaxis_title,
                 yaxis_title=yaxis_title,
                 # show_y_tokens=show_y_tokens,

@@ -133,7 +133,7 @@ def forward2(text, tokenizer, model, decoder_text: str = '', output_attentions: 
         if not enc_dec:
             model_input = tokenize(text, tokenizer, return_offsets_mapping=True)
         else:
-            model_input = tokenize(text, tokenizer, add_special_tokens=False, return_offsets_mapping=True)
+            model_input = tokenize(text, tokenizer, add_special_tokens=True, return_offsets_mapping=True)
             decoder_input = tokenize(decoder_text, tokenizer, add_special_tokens=True, return_offsets_mapping=True)
             model_input['decoder_offset_mapping'] = decoder_input['offset_mapping']
             model_input['decoder_input_ids'] = model._shift_right(decoder_input['input_ids'])

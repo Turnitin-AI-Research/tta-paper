@@ -132,3 +132,5 @@ dmypy.json
 tmp/
 _cache_model/
 *.pkl
+cache/
+notebooks/figures/

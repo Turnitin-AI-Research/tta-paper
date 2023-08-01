@@ -1,4 +1,4 @@
-"""Utility methods for pandagrader modules."""
+"""Module for managing parameters."""
 from pathlib import Path
 from typing import Any, Mapping, Optional, Union, Dict, List, Tuple
 import json
@@ -370,22 +370,6 @@ class Params(dict):
             if isinstance(v, Params) and self._intercept(k):
                 v.seal()
         return self
-
-
-# class HyperParams(Params):
-#     """
-#     Specialization of Params class for Hyper Parameters.
-#     """
-
-#     @classmethod
-#     def _params_class(cls) -> Any:
-#         """Overridden to return this class"""
-#         return HyperParams
-
-#     @classmethod
-#     def _new(cls, val: Optional[Mapping] = None) -> Any:
-#         """Overriden to return objects of this class"""
-#         return HyperParams(val)
 
 
 class NDict(dict):
