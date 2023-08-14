@@ -2,17 +2,17 @@ This repository has the visualizaiton code for the paper "Analyzing Transformer 
 All visualizations are in notebooks under the notebooks folder.
 
 ## Python environment setup
-First ensure that you have python version >=3.8.13 .
+First ensure that you have python version 3.8. A higher version should work too, but in that case you'll need to recompile the requirements file tta.txt (explained later).
 Then setup a python virtual environment called 'tta' in the directory .venv_tta as follows.
 ```
-$ python3 -m venv --prompt tta .venv_tta
+$ python3.8 -m venv --prompt tta .venv_tta
 $ source .venv_tta/bin/activate
 $ pip install pip-tools
 $ pip-sync env_files/tta.txt
 ```
 All notebooks and code runs under the above virtual environment.
 
-`env_files` has files tta.in where all the environment packages are listed. This gets compiled into a requirements file: tta.txt which is used to populate the python virtual environment as above. Should you need to recreate the environment file tta.txt follow these instructions:
+`env_files` has files tta.in where all the environment packages are listed. This gets compiled into a requirements file: tta.txt which is used to populate the python virtual environment as above. If you chose to use a different version of python, then recreate the environment file tta.txt as below:
 
 ```
 $ cd env_files

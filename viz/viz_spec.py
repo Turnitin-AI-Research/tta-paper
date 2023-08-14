@@ -285,8 +285,8 @@ class PosEncodingSpec(TensorSpec):
                  show_tokens: bool = False,
                  knn: bool = False,
                  colorscale: str = 'cividis_r',
-                 share_x_axis: bool = 'all',  # 'all' | 'columns' | False
-                 share_y_axis: bool = 'all',  # 'all' | 'rows' | False
+                #  share_x_axis: bool = 'all',  # 'all' | 'columns' | False
+                #  share_y_axis: bool = 'all',  # 'all' | 'rows' | False
                  **kwargs: Any) -> None:
         super().__init__(
             key=key,
@@ -299,8 +299,8 @@ class PosEncodingSpec(TensorSpec):
             yaxis_title=yaxis_title,
             show_tokens=show_tokens,
             knn=knn,
-            share_x_axis=share_x_axis,
-            share_y_axis=share_y_axis,
+            # share_x_axis=share_x_axis,
+            # share_y_axis=share_y_axis,
             **kwargs)
         self.sidebar_controls['row-or-col'].default = 'row'
 
