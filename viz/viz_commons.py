@@ -3,7 +3,7 @@ from typing import MutableMapping, Any, Union, Mapping, Dict, List, Tuple
 import os
 import numpy as np
 import torch
-from params import NDict
+from attrdict import NDict
 from logger import get_logger
 
 _LOGGER = get_logger(os.path.basename(__file__))

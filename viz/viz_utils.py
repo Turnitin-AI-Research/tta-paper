@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 from viz.viz_plot import plot1
 from viz.viz_spec import AttentionSpec, PosEncodingSpec
 from viz.viz_commons import mid_point
-from params import Params
+from attrdict import Params
 
 
 def show_fig(fig: go.Figure, renderer: Optional[str] = 'iframe connected', figdir=None) -> str:
@@ -72,6 +72,7 @@ def plot_attention_maps(*,
         position_bias_kernel = None
 
     OutputPathPrefix = f"figures/{ModelName.replace('/', '-')}/dataum_id={datum_id.replace('/', '-')}-stack={stack}-layer={layer}-head={head}"
+    os.makedirs(Path(OutputPathPrefix).parent, exist_ok=True)
     titles = [f'$Q_{{{head}}}.K_{{{head}}}^T$',
               f'Position Bias: {stack} layer {layer}, head {head}',
               f'Position Bias Kernel: {stack} layer {layer}, head {head}',
@@ -107,7 +108,7 @@ def plot_attention_maps(*,
     if position_bias is not None:
         fig2 = plot1(W=position_bias,
                      W_name=titles[1],
-                     T_spec=PosEncodingSpec(key=None, xaxis_title='Key Position', yaxis_title='Query Position'),
+                     T_spec=AttentionSpec(key=None, xaxis_title='Key Position', yaxis_title='Query Position'),
                      colorscale='cividis_r',
                      vscale=1, hscale=hscale or 1,
                      stack_heads=stack_heads,

@@ -7,7 +7,7 @@ import torch
 from dash import dcc
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
-from params import NDict, Params
+from attrdict import NDict, Params
 from logger import get_logger
 from viz.viz_spec import PLOT_MARGINS, empty_graph, TensorSpec
 from viz.viz_commons import preprocess, mid_point
@@ -235,8 +235,8 @@ def plot1(*,
                         row_heights=ps.row_dist,
                         cols=ps.num_cols,
                         column_widths=ps.col_dist,
-                        shared_yaxes=True,
-                        shared_xaxes=True,  # if stack_heads else False,
+                        shared_yaxes=T_spec['share_y_axis'] or False,
+                        shared_xaxes=T_spec['share_x_axis'] or 'columns',  # if stack_heads else False,
                         horizontal_spacing=ps.horizontal_spacing,
                         vertical_spacing=ps.vertical_spacing,
                         column_titles=[head_name(i) for i in range(ps.num_heads)] if (
