@@ -16,7 +16,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import ray
 import pandas as pd
-from params import Params, NDict
+from attrdict import Params, NDict
 from viz.viz_knn import knn_index
 
 

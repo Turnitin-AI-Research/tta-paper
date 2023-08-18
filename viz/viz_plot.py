@@ -7,7 +7,7 @@ import torch
 from dash import dcc
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
-from params import NDict, Params
+from attrdict import NDict, Params
 from logger import get_logger
 from viz.viz_spec import PLOT_MARGINS, empty_graph, TensorSpec
 from viz.viz_commons import preprocess, mid_point

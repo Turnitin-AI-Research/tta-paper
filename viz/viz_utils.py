@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 from viz.viz_plot import plot1
 from viz.viz_spec import AttentionSpec, PosEncodingSpec
 from viz.viz_commons import mid_point
-from params import Params
+from attrdict import Params
 
 
 def show_fig(fig: go.Figure, renderer: Optional[str] = 'iframe connected', figdir=None) -> str:

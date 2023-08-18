@@ -6,7 +6,7 @@ import numpy as np
 from ruamel.yaml import YAML
 import plotly.express as px
 from dash import dcc
-from params import Params, NDict
+from attrdict import Params, NDict
 
 # UCS colormap is perceptually Uniform Color Space i.e. it has linear visual perception delta of which
 # viridis is the gold standard (see https://arxiv.org/pdf/1712.01662.pdf)
